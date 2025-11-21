@@ -9,8 +9,12 @@ import sentencepiece as spm
 
 @dataclass
 class TokenizerConfig:
-    model_path: Path
-    vocab_path: Path
+    """
+    Tokenizer 配置，使用纯字符串路径以避免在 .pt 中持久化平台相关的 Path 对象。
+    """
+
+    model_path: str
+    vocab_path: str
 
 
 class TextTokenizer:
@@ -19,7 +23,7 @@ class TextTokenizer:
     def __init__(self, cfg: TokenizerConfig) -> None:
         self.cfg = cfg
         self.sp = spm.SentencePieceProcessor()
-        self.sp.load(str(cfg.model_path))
+        self.sp.load(cfg.model_path)
 
         # 记录 vocab 大小，方便与 config.labels / joint.num_classes 对比
         self.vocab_size = int(self.sp.vocab_size())
@@ -39,13 +43,13 @@ class TextTokenizer:
             model_candidates = sorted(model_dir.glob("*.model"))
         if not model_candidates:
             raise FileNotFoundError(f"No SentencePiece .model file found under {model_dir}")
-        model_path = model_candidates[0]
+        model_path = str(model_candidates[0])
 
         # 词表文件（当前实现未直接使用，保留路径方便调试）
         vocab_candidates = sorted(model_dir.glob("*vocab.txt"))
         if not vocab_candidates:
             vocab_candidates = sorted(model_dir.glob("*tokenizer*.vocab"))
-        vocab_path = vocab_candidates[0] if vocab_candidates else model_dir / "vocab.txt"
+        vocab_path = str(vocab_candidates[0]) if vocab_candidates else str(model_dir / "vocab.txt")
 
         cfg = TokenizerConfig(model_path=model_path, vocab_path=vocab_path)
         return cls(cfg)
