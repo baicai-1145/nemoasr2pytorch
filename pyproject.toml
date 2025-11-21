@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=64", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nemoasr2pytorch"
+version = "0.1.0"
+description = "Pure-PyTorch inference port of NeMo ASR (VAD + Parakeet-TDT) for Windows/WSL"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [
+  { name = "baicai1145" }
+]
+dependencies = [
+  "numpy>=1.23",
+  "librosa>=0.10.0",
+  "sentencepiece>=0.1.99",
+  "PyYAML>=6.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/baicai1145/nemoasr2pytorch"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["nemoasr2pytorch*"]
+
