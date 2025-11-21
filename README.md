@@ -10,9 +10,19 @@
 
 ## 安装
 
-```bash
-pip install -r requirements.txt
-```
+1. 先按照官方文档安装 **合适的 PyTorch / torchaudio 版本**，例如 CUDA 12.6 环境下：
+
+   ```bash
+   pip install torch==2.7.1 torchvision==0.22.1 torchaudio==2.7.1 --index-url https://download.pytorch.org/whl/cu126
+   ```
+
+   如需 CPU 版本或其他 CUDA 版本，请参考 https://pytorch.org/get-started/previous-versions/。
+
+2. 再安装本项目其余依赖：
+
+   ```bash
+   pip install -r requirements.txt
+   ```
 
 ## 快速上手
 
