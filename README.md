@@ -39,7 +39,7 @@
 核心 Python 包为 `nemoasr2pytorch`，主要入口如下：
 
 - `nemoasr2pytorch/vad/api.py`  
-  - `load_default_frame_vad_model()`：加载 MarbleNet VAD 模型。  
+  - `load_default_frame_vad_model()`：加载 MarbleNet VAD 模型（若本地缺失会自动从 ModelScope 下载到 `./exports`）。  
   - `frame_vad(...)`：对输入波形做帧级 VAD 推理。  
 - `nemoasr2pytorch/asr/api.py`  
   - `load_default_parakeet_tdt_model(lang=\"EN\" | \"EU\")`：以 FP32 加载 parakeet-tdt 模型，按语言预设选择 v2（EN）或 v3（EU）。  

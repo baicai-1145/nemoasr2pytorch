@@ -9,9 +9,9 @@ import torch
 from nemoasr2pytorch.models.asr.parakeet_tdt import ParakeetTDTModel
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_PARAKEET_V2_PT = REPO_ROOT / "exports/parakeet_tdt_0.6b_v2.pt"
-DEFAULT_PARAKEET_V3_PT = REPO_ROOT / "exports/parakeet_tdt_0.6b_v3.pt"
+# 在作为库使用（包括 pip 安装）时，默认在当前工作目录下查找/保存模型文件。
+DEFAULT_PARAKEET_V2_PT = Path.cwd() / "exports/parakeet_tdt_0.6b_v2.pt"
+DEFAULT_PARAKEET_V3_PT = Path.cwd() / "exports/parakeet_tdt_0.6b_v3.pt"
 
 
 def _get_parakeet_pt_by_lang(lang: str) -> Path:

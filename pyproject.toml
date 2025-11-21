@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "nemoasr2pytorch"
 version = "0.1.0"
 description = "Pure-PyTorch inference port of NeMo ASR (VAD + Parakeet-TDT) for Windows/WSL"
-readme = "README.md"
+readme = "README_PYPI.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [
@@ -25,4 +25,3 @@ Homepage = "https://github.com/baicai1145/nemoasr2pytorch"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["nemoasr2pytorch*"]
-

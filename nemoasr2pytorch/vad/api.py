@@ -10,8 +10,40 @@ import torch
 from nemoasr2pytorch.models.vad.frame_vad_model import FrameVADModel
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_VAD_PT = REPO_ROOT / "exports/frame_vad_multilingual_marblenet_v2.0.pt"
+# 在作为库使用（包括 pip 安装）时，默认在当前工作目录下查找/保存模型文件。
+DEFAULT_VAD_PT = Path.cwd() / "exports/frame_vad_multilingual_marblenet_v2.0.pt"
+
+
+def _ensure_vad_pt() -> Path:
+    """
+    确保本地存在 MarbleNet VAD 的 .pt 文件：
+    - 若本地已存在则直接返回；
+    - 若不存在则尝试从 ModelScope 自动下载。
+    """
+    if DEFAULT_VAD_PT.is_file():
+        return DEFAULT_VAD_PT
+
+    url = (
+        "https://www.modelscope.cn/models/baicai1145/nemoasr2pytorch/"
+        "resolve/master/frame_vad_multilingual_marblenet_v2.0.pt"
+    )
+    DEFAULT_VAD_PT.parent.mkdir(parents=True, exist_ok=True)
+
+    try:  # pragma: no cover - 依赖于用户网络环境
+        import urllib.request
+
+        print(f"[nemoasr2pytorch] Downloading VAD model from {url} ...")
+        urllib.request.urlretrieve(url, DEFAULT_VAD_PT)
+        print(f"[nemoasr2pytorch] Saved VAD model to {DEFAULT_VAD_PT}")
+        return DEFAULT_VAD_PT
+    except Exception as e:  # pragma: no cover - 依赖于用户网络环境
+        raise FileNotFoundError(
+            f"Failed to download VAD .pt model to {DEFAULT_VAD_PT}.\n"
+            f"URL: {url}\n"
+            f"Error: {e}\n"
+            "Please check your network / proxy settings, or manually download the file "
+            "and place it at the expected path."
+        ) from e
 
 
 def load_default_frame_vad_model(
@@ -20,22 +52,16 @@ def load_default_frame_vad_model(
 ) -> FrameVADModel:
     """
     加载默认的 Frame_VAD_Multilingual_MarbleNet_v2.0 模型（仅支持 .pt）。
-
-    要先使用 examples/export_from_nemo_to_pt.py 将 .nemo 导出为 exports/frame_vad_marblenet.pt。
+    若本地不存在，会自动从 ModelScope 下载到 ./exports/ 目录下。
     """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    if DEFAULT_VAD_PT.is_file():
-        model = torch.load(DEFAULT_VAD_PT, map_location=device, weights_only=False)
-        model.to(device=device, dtype=dtype)
-        model.eval()
-        return model
-
-    raise FileNotFoundError(
-        f"Default VAD .pt model not found: {DEFAULT_VAD_PT}. "
-        "Please export it from the original .nemo using examples/export_from_nemo_to_pt.py."
-    )
+    pt_path = _ensure_vad_pt()
+    model = torch.load(pt_path, map_location=device, weights_only=False)
+    model.to(device=device, dtype=dtype)
+    model.eval()
+    return model
 
 
 @dataclass
