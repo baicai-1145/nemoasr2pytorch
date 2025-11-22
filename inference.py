@@ -160,6 +160,13 @@ def main() -> None:
         help="Maximum target segment duration (seconds) per ASR chunk (default: 60).",
     )
     parser.add_argument(
+        "--vad-threshold",
+        type=float,
+        default=0.5,
+        help="VAD speech probability threshold in [0,1]. "
+        "Higher -> fewer, more confident speech segments (default: 0.5).",
+    )
+    parser.add_argument(
         "--debug-time",
         action="store_true",
         help="Print simple time profiling of VAD vs ASR.",
@@ -240,7 +247,11 @@ def main() -> None:
             )
 
         # 直接将 waveform 作为张量传入 VAD（run_vad_on_waveform 自身不会重采样张量）
-        _, vad_segments = run_vad_on_waveform(vad_model, waveform)
+        _, vad_segments = run_vad_on_waveform(
+            vad_model,
+            waveform,
+            threshold=args.vad_threshold,
+        )
 
         # VAD 用完后主动释放 GPU 显存
         del vad_model

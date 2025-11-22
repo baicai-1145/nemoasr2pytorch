@@ -1,27 +1,39 @@
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
-
-import torch
 
 # 确保可以从 examples/ 下直接运行脚本时找到项目包
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from nemoasr2pytorch.vad.api import run_vad_on_waveform
+from nemoasr2pytorch.vad.api import load_default_frame_vad_model, run_vad_on_waveform
 
 
 def main() -> None:
-    wav_path = REPO_ROOT / "test_long.wav"
-    model_path = REPO_ROOT / "exports/frame_vad_multilingual_marblenet_v2.0.pt"
+    parser = argparse.ArgumentParser(
+        description="Run MarbleNet VAD demo and print detected speech segments."
+    )
+    parser.add_argument(
+        "--wav",
+        type=str,
+        default=str(REPO_ROOT / "test_long.wav"),
+        help="Path to input WAV file (default: test_long.wav).",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.5,
+        help="VAD speech probability threshold in [0,1] (default: 0.5).",
+    )
+    args = parser.parse_args()
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    model = torch.load(model_path, map_location=device, weights_only=False)
-    model.eval()
+    wav_path = Path(args.wav)
 
-    probs, segments = run_vad_on_waveform(model, str(wav_path))
+    model = load_default_frame_vad_model()
+    probs, segments = run_vad_on_waveform(model, str(wav_path), threshold=args.threshold)
 
     print(f"Frame probs shape: {probs.shape}")
     for i, seg in enumerate(segments):
