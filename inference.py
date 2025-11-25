@@ -162,7 +162,7 @@ def main() -> None:
     parser.add_argument(
         "--vad-threshold",
         type=float,
-        default=0.5,
+        default=0.8,
         help="VAD speech probability threshold in [0,1]. "
         "Higher -> fewer, more confident speech segments (default: 0.5).",
     )
@@ -170,6 +170,12 @@ def main() -> None:
         "--debug-time",
         action="store_true",
         help="Print simple time profiling of VAD vs ASR.",
+    )
+    parser.add_argument(
+        "--with-word-ts",
+        action="store_true",
+        help="Print word-level timestamps for each ASR chunk "
+        "(requires Parakeet model with `transcribe_with_word_timestamps`).",
     )
     args = parser.parse_args()
 
@@ -286,7 +292,17 @@ def main() -> None:
         # 为 ASR 模型提供 1D waveform 张量
         t_chunk_start = time.perf_counter()
         t_asr_start = t_chunk_start
-        text = asr_infer(asr_model, chunk)
+
+        if args.with_word_ts and hasattr(asr_model, "transcribe_with_word_timestamps"):
+            # 直接使用模型的带时间戳接口（内部会重复 encode 一遍，简单但清晰）
+            asr_device = next(asr_model.parameters()).device
+            text, word_offsets = asr_model.transcribe_with_word_timestamps(  # type: ignore[attr-defined]
+                chunk.to(device=asr_device)
+            )
+        else:
+            text = asr_infer(asr_model, chunk)
+            word_offsets = None
+
         t_asr_end = time.perf_counter()
         asr_time += t_asr_end - t_asr_start
 
@@ -298,6 +314,13 @@ def main() -> None:
             f"[chunk {idx}] {start_s:.2f}s - {end_s:.2f}s "
             f"({end_s - start_s:.2f}s) [{lang}/{precision}]: {text}"
         )
+
+        if args.with_word_ts and word_offsets:
+            for w in word_offsets:
+                print(
+                    f"  -> {w['word']!r}: {w['start']:.2f}s - {w['end']:.2f}s "
+                    f"(frames {w['start_offset']}-{w['end_offset']})"
+                )
 
     full_text = " ".join(t for t in texts if t)
     print("\n=== Final Transcription ===")

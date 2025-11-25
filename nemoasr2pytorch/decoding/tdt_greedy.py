@@ -15,6 +15,15 @@ class TDTGreedyConfig:
     max_symbols_per_step: int = 10
 
 
+@dataclass
+class TDTDecodeResult:
+    """TDT 解码结果，包含 token 序列及其对应的帧级时间信息。"""
+
+    token_ids: List[int]
+    token_starts: List[int]    # label_time（起始帧）
+    token_durations: List[int]  # duration（帧数）
+
+
 class GreedyTDTDecoder:
     """TDT label-looping 贪心解码（单样本版本）。
 
@@ -28,17 +37,20 @@ class GreedyTDTDecoder:
         self.cfg = cfg
 
     @torch.no_grad()
-    def decode(
+    def decode_with_timestamps(
         self,
         enc_out: torch.Tensor,
         enc_len: torch.Tensor,
-    ) -> List[int]:
+    ) -> TDTDecodeResult:
         """
         Args:
             enc_out: [1, D, T] 编码器输出
             enc_len: [1] 有效帧长度
         Returns:
-            token_ids: List[int]（BPE id 序列）
+            TDTDecodeResult:
+                - token_ids: List[int]（BPE id 序列）
+                - token_starts: List[int]（每个 token 的起始帧 index）
+                - token_durations: List[int]（每个 token 覆盖的帧数）
         """
 
         if enc_out.size(0) != 1:
@@ -51,7 +63,7 @@ class GreedyTDTDecoder:
         encoder_out = enc_out.transpose(1, 2)
         T_enc = int(enc_len[0].item())
         if T_enc <= 0:
-            return []
+            return TDTDecodeResult(token_ids=[], token_starts=[], token_durations=[])
 
         last_timestep = T_enc - 1
 
@@ -76,6 +88,9 @@ class GreedyTDTDecoder:
 
         # 记录输出 token 及“同一时间帧发射次数”
         output_tokens: List[int] = []
+        token_starts: List[int] = []
+        token_durations: List[int] = []
+
         last_timestamp = -1
         last_timestamp_lasts = 0
 
@@ -142,6 +157,8 @@ class GreedyTDTDecoder:
 
             if found_label:
                 output_tokens.append(label_idx)
+                token_starts.append(label_time)
+                token_durations.append(duration)
 
                 # 维护与 NeMo BatchedHyps 等价的 last_timestamp / last_timestamp_lasts
                 if label_time == last_timestamp:
@@ -164,7 +181,23 @@ class GreedyTDTDecoder:
             if not active:
                 break
 
-        return output_tokens
+        return TDTDecodeResult(
+            token_ids=output_tokens,
+            token_starts=token_starts,
+            token_durations=token_durations,
+        )
+
+    @torch.no_grad()
+    def decode(
+        self,
+        enc_out: torch.Tensor,
+        enc_len: torch.Tensor,
+    ) -> List[int]:
+        """
+        保持原有接口：仅返回 token id 序列。
+        """
+        result = self.decode_with_timestamps(enc_out, enc_len)
+        return result.token_ids
 
 
-__all__ = ["TDTGreedyConfig", "GreedyTDTDecoder"]
+__all__ = ["TDTGreedyConfig", "GreedyTDTDecoder", "TDTDecodeResult"]

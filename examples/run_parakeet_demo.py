@@ -42,21 +42,48 @@ def main() -> None:
         default="fp32",
         help="Precision preset: fp32 / fp16 / bf16.",
     )
+    parser.add_argument(
+        "--with-word-ts",
+        action="store_true",
+        help="Print word-level timestamps instead of plain text "
+        "(requires Parakeet model with `transcribe_with_word_timestamps`).",
+    )
     args = parser.parse_args()
 
     wav_path = Path(args.wav)
 
     if args.precision == "fp32":
         model = load_default_parakeet_tdt_model(lang=args.lang)
-        text = transcribe(model, str(wav_path))
+        infer_fn = transcribe
     elif args.precision == "fp16":
         model = load_parakeet_tdt_fp16(lang=args.lang)
-        text = transcribe_amp(model, str(wav_path))
+        infer_fn = transcribe_amp
     else:  # bf16
         model = load_parakeet_tdt_bf16(lang=args.lang)
-        text = transcribe_amp(model, str(wav_path))
+        infer_fn = transcribe_amp
 
-    print(f"lang={args.lang} precision={args.precision} transcription: {text}")
+    if args.with_word_ts and hasattr(model, "transcribe_with_word_timestamps"):
+        import torchaudio
+
+        waveform, sr = torchaudio.load(str(wav_path))
+        if sr != model.sample_rate:
+            waveform = torchaudio.functional.resample(waveform, sr, model.sample_rate)
+        waveform = waveform.squeeze(0)
+
+        asr_device = next(model.parameters()).device
+        text, word_offsets = model.transcribe_with_word_timestamps(  # type: ignore[attr-defined]
+            waveform.to(device=asr_device)
+        )
+        print(f"lang={args.lang} precision={args.precision} text: {text}")
+        print("Word-level timestamps:")
+        for w in word_offsets:
+            print(
+                f"  {w['word']!r}: {w['start']:.2f}s - {w['end']:.2f}s "
+                f"(frames {w['start_offset']}-{w['end_offset']})"
+            )
+    else:
+        text = infer_fn(model, str(wav_path))
+        print(f"lang={args.lang} precision={args.precision} transcription: {text}")
 
 
 if __name__ == "__main__":
