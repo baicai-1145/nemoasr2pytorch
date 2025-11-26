@@ -25,7 +25,7 @@ def main() -> None:
     parser.add_argument(
         "--threshold",
         type=float,
-        default=0.5,
+        default=0.8,
         help="VAD speech probability threshold in [0,1] (default: 0.5).",
     )
     args = parser.parse_args()

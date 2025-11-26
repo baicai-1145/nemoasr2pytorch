@@ -79,6 +79,26 @@ class FrameVADModel(nn.Module):
 
     @property
     def frame_stride(self) -> float:
-        """返回帧移（秒）。"""
-        return self.preprocessor.frame_stride
+        """返回帧移（秒），包含编码器中的时间下采样因子。
 
+        NeMo 的 MarbleNet VAD 模型通常在 encoder 的首个 block 中使用 stride>1
+        进行时间下采样，因此最终帧间隔应为：
+
+            frame_stride = preprocessor.frame_stride * encoder_subsampling_factor
+
+        这里通过遍历 MarbleNetEncoder 内部的卷积层来自动推断总的时间下采样倍数，
+        从而避免依赖额外的配置或导出信息。
+        """
+        subsampling = 1
+        # MarbleNetEncoder.blocks -> MarbleNetBlock.layers -> SeparableConvUnit
+        for block in getattr(self.encoder, "blocks", []):
+            for unit in getattr(block, "layers", []):
+                conv = unit.depthwise if getattr(unit, "depthwise", None) is not None else unit.pointwise
+                if conv is not None and hasattr(conv, "stride"):
+                    # conv.stride 是 (stride_t,) 这样的元组
+                    subsampling *= int(conv.stride[0])
+
+        if subsampling <= 0:
+            subsampling = 1
+
+        return self.preprocessor.frame_stride * float(subsampling)

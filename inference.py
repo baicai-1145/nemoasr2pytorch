@@ -316,10 +316,30 @@ def main() -> None:
         )
 
         if args.with_word_ts and word_offsets:
+            # 将分段内的相对时间戳转换为原始音频上的绝对时间戳
+            frame_stride = None
+            try:
+                # 与 ParakeetTDTModel.transcribe_with_word_timestamps 中的计算保持一致
+                subsampling_factor = getattr(asr_model.encoder.cfg, "subsampling_factor", 1)  # type: ignore[attr-defined]
+                frame_stride = asr_model.preprocessor.frame_stride * float(subsampling_factor)  # type: ignore[attr-defined]
+            except Exception:
+                frame_stride = None
+
+            if frame_stride is not None and frame_stride > 0.0:
+                frame_offset = int(round(start_s / frame_stride))
+            else:
+                frame_offset = 0
+
             for w in word_offsets:
+                # 更新为全局时间 / 帧索引
+                w_start = w["start"] + start_s
+                w_end = w["end"] + start_s
+                w_start_f = w["start_offset"] + frame_offset
+                w_end_f = w["end_offset"] + frame_offset
+
                 print(
-                    f"  -> {w['word']!r}: {w['start']:.2f}s - {w['end']:.2f}s "
-                    f"(frames {w['start_offset']}-{w['end_offset']})"
+                    f"  -> {w['word']!r}: {w_start:.2f}s - {w_end:.2f}s "
+                    f"(frames {w_start_f}-{w_end_f})"
                 )
 
     full_text = " ".join(t for t in texts if t)
