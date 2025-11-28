@@ -21,6 +21,10 @@ from nemoasr2pytorch.asr.api import (  # type: ignore[import]
     transcribe,
     transcribe_amp,
 )
+from nemoasr2pytorch.asr.streaming.pipeline import (  # type: ignore[import]
+    BufferedParakeetPipeline,
+    StreamingConfig,
+)
 from nemoasr2pytorch.vad.api import (  # type: ignore[import]
     load_default_frame_vad_model,
     run_vad_on_waveform,
@@ -177,6 +181,36 @@ def main() -> None:
         help="Print word-level timestamps for each ASR chunk "
         "(requires Parakeet model with `transcribe_with_word_timestamps`).",
     )
+    parser.add_argument(
+        "--streaming",
+        action="store_true",
+        help="Use streaming Parakeet pipeline instead of chunked offline decoding.",
+    )
+    parser.add_argument(
+        "--stream-chunk-sec",
+        type=float,
+        default=8.0,
+        help="Streaming chunk size in seconds when --streaming is enabled (default: 8).",
+    )
+    parser.add_argument(
+        "--stream-left-pad-sec",
+        type=float,
+        default=0.0,
+        help="Left padding seconds for streaming chunks (default: 0).",
+    )
+    parser.add_argument(
+        "--stream-right-pad-sec",
+        type=float,
+        default=0.0,
+        help="Right padding seconds for streaming chunks (default: 0).",
+    )
+    parser.add_argument(
+        "--stream-stop-history-ms",
+        type=int,
+        default=-1,
+        help="Streaming EOU detection window in milliseconds "
+        "(<=0 to disable endpointing, similar to NeMo stop_history_eou).",
+    )
     args = parser.parse_args()
 
     wav_path = Path(args.wav)
@@ -228,6 +262,56 @@ def main() -> None:
     vad_time = 0.0
     asr_time = 0.0
     chunk_overhead_time = 0.0
+
+    # --- Streaming 模式：直接使用 buffered Parakeet pipeline，对整段音频做流式推理 ---
+    if args.streaming:
+        if args.with_word_ts:
+            print(
+                "[nemoasr2pytorch] --with-word-ts is currently not supported in streaming mode; "
+                "falling back to text-only transcript."
+            )
+        if not args.no_vad:
+            print(
+                "[nemoasr2pytorch] --streaming currently ignores VAD-related options; "
+                "running streaming ASR on the full audio."
+            )
+
+        stream_cfg = StreamingConfig(
+            sample_rate=target_sr,
+            chunk_size=args.stream_chunk_sec,
+            left_padding_size=args.stream_left_pad_sec,
+            right_padding_size=args.stream_right_pad_sec,
+            stop_history_eou_ms=args.stream_stop_history_ms,
+        )
+        stream_device = device_override or next(asr_model.parameters()).device
+
+        pipeline = BufferedParakeetPipeline(
+            model=asr_model,
+            cfg=stream_cfg,
+            device=stream_device,
+        )
+
+        t_asr_start = time.perf_counter()
+        full_text = pipeline.run_streaming(waveform)
+        asr_time = time.perf_counter() - t_asr_start
+
+        print("\n=== Final Transcription (streaming) ===")
+        print(full_text)
+
+        if args.debug_time:
+            total_time = time.perf_counter() - t_total_start
+            other = total_time - vad_time - asr_time - model_load_time - audio_load_time - chunk_overhead_time
+            print(
+                "\n[profiling]\n"
+                f"  model_load_time   = {model_load_time:.2f}s\n"
+                f"  audio_load_time   = {audio_load_time:.2f}s\n"
+                f"  vad_time          = {vad_time:.2f}s\n"
+                f"  asr_time          = {asr_time:.2f}s\n"
+                f"  chunk_overhead    = {chunk_overhead_time:.2f}s\n"
+                f"  other             = {other:.2f}s\n"
+                f"  total             = {total_time:.2f}s"
+            )
+        return
 
     # 构建切分区间（单位：秒）
     if args.no_vad:

@@ -65,6 +65,27 @@ class ParakeetTDTModel(nn.Module):
     def sample_rate(self) -> int:
         return self.cfg.sample_rate
 
+    # ---- 时间轴元信息（用于 timestamps / streaming）----
+
+    @property
+    def frame_stride(self) -> float:
+        """Mel 特征帧移（秒），直接来源于预处理器。"""
+        return float(self.preprocessor.frame_stride)
+
+    @property
+    def subsampling_factor(self) -> int:
+        """Conformer 编码器的时间下采样倍数。"""
+        return int(getattr(self.encoder.cfg, "subsampling_factor", 1))
+
+    @property
+    def model_stride_in_secs(self) -> float:
+        """Encoder 输出一个时间步对应的秒数。"""
+        return self.frame_stride * float(self.subsampling_factor)
+
+    def time_from_encoder_step(self, idx: int) -> float:
+        """给定 encoder 帧 index，返回对应的时间（秒）。"""
+        return float(idx) * self.model_stride_in_secs
+
     @torch.no_grad()
     def encode(self, waveform: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
         """
@@ -141,10 +162,8 @@ class ParakeetTDTModel(nn.Module):
         token_starts = decode_res.token_starts
         token_durs = decode_res.token_durations
 
-        # TDT 时间轴是在编码器输出帧上，实际时间步长 = mel 帧步长 * subsampling_factor
-        subsampling_factor = getattr(self.encoder.cfg, "subsampling_factor", 1)
-        frame_stride = self.preprocessor.frame_stride * float(subsampling_factor)
-        word_offsets = self._bpe_tokens_to_word_offsets(token_ids, token_starts, token_durs, frame_stride)
+        # TDT 时间轴是在编码器输出帧上，时间映射统一通过 model_stride_in_secs 计算
+        word_offsets = self._bpe_tokens_to_word_offsets(token_ids, token_starts, token_durs)
         text = self.tokenizer.decode(token_ids)
         return text, word_offsets
 
@@ -153,7 +172,6 @@ class ParakeetTDTModel(nn.Module):
         token_ids: List[int],
         token_starts: List[int],
         token_durs: List[int],
-        frame_stride: float,
     ) -> List[Dict[str, float]]:
         """
         基于 SentencePiece BPE token 序列聚合出 word-level 时间戳。
@@ -183,8 +201,8 @@ class ParakeetTDTModel(nn.Module):
                     "word": cur_text,
                     "start_offset": cur_start_f,
                     "end_offset": cur_end_f,
-                    "start": cur_start_f * frame_stride,
-                    "end": cur_end_f * frame_stride,
+                    "start": self.time_from_encoder_step(cur_start_f),
+                    "end": self.time_from_encoder_step(cur_end_f),
                 }
             )
             cur_text = None
