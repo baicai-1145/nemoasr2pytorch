@@ -96,6 +96,7 @@ class BufferedParakeetPipeline:
         # 累积的波形前缀，用于在每个 step 上对「截至目前的整段音频」做一次完整 TDT 解码，
         # 保证流式文本在任何时刻都尽可能接近离线 NeMo 结果。
         self._waveform_prefix: torch.Tensor | None = None
+        self._last_word_offsets: List[dict] = []
 
     def _init_zero_encoded(self) -> torch.Tensor:
         """
@@ -114,6 +115,40 @@ class BufferedParakeetPipeline:
         self.state.set_global_offset(-self.initial_delay)
         self._all_token_ids.clear()
         self._waveform_prefix = None
+        self._last_word_offsets = []
+
+    @property
+    def last_word_offsets(self) -> List[dict]:
+        """
+        返回最近一次解码得到的 word-level 时间戳信息（如果有）。
+        形如：
+            {
+                "word": "moment.",
+                "start_offset": 103,
+                "end_offset": 109,
+                "start": 8.24,
+                "end": 8.72,
+            }
+        """
+        return self._last_word_offsets
+
+    def trim_prefix_seconds(self, seconds: float) -> None:
+        """
+        在内部累积的 waveform 前缀上裁剪掉最前面的若干秒音频，用于在上层
+        依据句级边界裁剪上下文，避免前缀无限增长导致推理时间越来越长。
+        """
+        if self._waveform_prefix is None:
+            return
+        if seconds <= 0.0:
+            return
+        samples = int(seconds * self.sample_rate)
+        if samples <= 0:
+            return
+        if samples >= self._waveform_prefix.numel():
+            # 全部裁掉，后续再追加新 chunk
+            self._waveform_prefix = None
+        else:
+            self._waveform_prefix = self._waveform_prefix[samples:]
 
     def _waveform_to_chunks(self, waveform: torch.Tensor) -> List[Tuple[int, int]]:
         """
@@ -180,6 +215,10 @@ class BufferedParakeetPipeline:
 
         token_ids = list(decode_res.token_ids)
         timesteps = list(decode_res.token_starts)
+        token_durs = list(decode_res.token_durations)
+
+        # 保存当前 step 的 word-level 时间戳，供上层按句子边界裁剪上下文使用
+        self._last_word_offsets = self.model._bpe_tokens_to_word_offsets(token_ids, timesteps, token_durs)
 
         # 用完整前缀的 token/time 序列更新内部状态
         self.state.tokens = token_ids

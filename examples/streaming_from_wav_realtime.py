@@ -57,6 +57,11 @@ def main() -> None:
         help="Precision preset for Parakeet ASR: fp32 / fp16 / bf16.",
     )
     parser.add_argument(
+        "--cpu-only",
+        action="store_true",
+        help="Force VAD and ASR to run on CPU. In this mode precision is effectively fp32.",
+    )
+    parser.add_argument(
         "--chunk-sec",
         type=float,
         default=8.0,
@@ -84,9 +89,19 @@ def main() -> None:
     wav_path = Path(args.wav)
     lang = args.lang.upper()
 
-    # 选择设备与精度
-    device: str | torch.device = "cuda" if torch.cuda.is_available() else "cpu"
+    # 选择设备与精度（支持强制 CPU）
+    device: str | torch.device
     precision = args.precision
+    if args.cpu_only:
+        device = "cpu"
+        if precision != "fp32":
+            print(
+                "[nemoasr2pytorch] --cpu-only ignores low-precision setting "
+                f"(precision={precision}), forcing fp32 on CPU."
+            )
+            precision = "fp32"
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
     if precision == "fp32":
         asr_model = load_default_parakeet_tdt_model(lang=lang, device=device)
@@ -142,11 +157,20 @@ def main() -> None:
     start = 0
     chunk_idx = 0
     last_partial_text = ""
+    committed_text = ""
+    pending_trim_sec = 0.0
+    prev_words: list[str] = []
     while start < total_len:
         end = min(start + chunk_samples, total_len)
         chunk = waveform[start:end]
         is_last = end >= total_len
         is_first = chunk_idx == 0
+
+        # 如有待应用的前缀裁剪（按上一轮确认的句子边界），先裁剪内部 waveform 上下文
+        if pending_trim_sec > 0.0:
+            pipeline.trim_prefix_seconds(pending_trim_sec)
+            pending_trim_sec = 0.0
+            prev_words = []
 
         t0 = time.perf_counter()
         # 先用 VAD 判断该 chunk 是否包含语音
@@ -163,6 +187,46 @@ def main() -> None:
         else:
             partial_text = last_partial_text
 
+        # 基于最近两次的 word 序列，按句号等标点以及“下一个词已出现”的规则，
+        # 决定是否可以将前缀句子“定稿”，并在下一轮裁剪对应的音频上下文。
+        try:
+            word_offsets = pipeline.last_word_offsets
+        except AttributeError:
+            word_offsets = []
+
+        curr_words = [w["word"] for w in word_offsets]
+
+        if has_speech and prev_words and curr_words:
+            # 计算按 word 的最长公共前缀长度
+            lcp_len = 0
+            for w_prev, w_curr in zip(prev_words, curr_words):
+                if w_prev != w_curr:
+                    break
+                lcp_len += 1
+
+            # 在 LCP 内寻找最后一个以句号/问号/感叹号结尾且后面还有词的词，作为可定稿句子的结尾
+            punctuations = (".", "!", "?", "。", "！", "？")
+            candidate_idx = None
+            for idx in range(lcp_len):
+                if curr_words[idx].endswith(punctuations) and idx + 1 < len(curr_words):
+                    candidate_idx = idx
+
+            if candidate_idx is not None:
+                cut_word = word_offsets[candidate_idx]
+                cut_end_sec = float(cut_word["end"])
+
+                # 记录待裁剪的前缀时长（在下一轮 stream_step 前应用），
+                # 文本前缀则立刻作为 committed_text 固定下来。
+                pending_trim_sec = cut_end_sec
+                committed_text = " ".join(w["word"] for w in word_offsets[: candidate_idx + 1])
+                # 一旦确定句子边界，重置 prev_words，使后续 LCP 在新的上下文上重新计算
+                prev_words = []
+            else:
+                prev_words = curr_words
+        else:
+            if has_speech and curr_words:
+                prev_words = curr_words
+
         t1 = time.perf_counter()
 
         if args.realtime:
@@ -173,10 +237,21 @@ def main() -> None:
             if remain > 0:
                 time.sleep(remain)
 
+        # 展示文本：已定稿前缀 + 当前未定稿部分
+        if committed_text:
+            remaining_words = curr_words
+            remaining_text = " ".join(remaining_words) if remaining_words else ""
+            if remaining_text:
+                display_text = committed_text + " " + remaining_text
+            else:
+                display_text = committed_text
+        else:
+            display_text = partial_text
+
         print(
             f"[chunk {chunk_idx}] {start/target_sr:.2f}s - {end/target_sr:.2f}s "
             f"({(end-start)/target_sr:.2f}s) "
-            f"{'[speech]' if has_speech else '[silence]'} partial: {partial_text}"
+            f"{'[speech]' if has_speech else '[silence]'} partial: {display_text}"
         )
 
         start = end
